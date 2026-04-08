@@ -273,6 +273,21 @@ const MembersPage = () => {
 // ─── Lottery Settings Page ────────────────────────────────────
 const LotteryPage = () => {
   const [selectedLottery, setSelectedLottery] = useState(LOTTERY_TYPES[0]);
+  const [showLimitModal, setShowLimitModal] = useState(false);
+const [limits, setLimits] = useState([]);
+const [limitForm, setLimitForm] = useState({
+  betType: 'three_top', number: '', limit: '', rateOverride: '', isClosed: false
+});
+const [limitErr, setLimitErr] = useState('');
+
+const saveLimitItem = () => {
+  if (!limitForm.number) return setLimitErr('กรุณากรอกเลข');
+  if (!limitForm.isClosed && !limitForm.limit) return setLimitErr('กรุณากรอกยอดจำกัด หรือเลือกปิดรับทันที');
+  setLimits([...limits, { ...limitForm }]);
+  setShowLimitModal(false);
+  setLimitForm({ betType: 'three_top', number: '', limit: '', rateOverride: '', isClosed: false });
+  setLimitErr('');
+};
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -327,16 +342,87 @@ const LotteryPage = () => {
         </div>
       </div>
 
-      {/* Number Limits */}
-      <div style={{ background: "#0a0f1e", border: "1px solid #1e293b", borderRadius: 12, padding: 20 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
-          <span style={{ color: "#94a3b8", fontWeight: 700, fontSize: 14 }}>เลขอั้น / ปิดเลข</span>
-          <button style={{ background: "#ef4444", color: "#fff", border: "none", borderRadius: 8, padding: "6px 14px", cursor: "pointer", fontSize: 13 }}>+ เพิ่มเลขอั้น</button>
-        </div>
-        <div style={{ color: "#475569", textAlign: "center", padding: 24 }}>ยังไม่มีเลขอั้นสำหรับงวดนี้</div>
+      {/* ── แทนที่ส่วน Number Limits เดิม ── */}
+<div style={{ background: "#0a0f1e", border: "1px solid #1e293b", borderRadius: 12, padding: 20 }}>
+  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
+    <span style={{ color: "#94a3b8", fontWeight: 700, fontSize: 14 }}>เลขอั้น / ปิดเลข</span>
+    <button onClick={() => setShowLimitModal(true)}
+      style={{ background: "#ef4444", color: "#fff", border: "none", borderRadius: 8, padding: "6px 14px", cursor: "pointer", fontSize: 13 }}>
+      + เพิ่มเลขอั้น
+    </button>
+  </div>
+
+  {limits.length === 0
+    ? <div style={{ color: "#475569", textAlign: "center", padding: 24 }}>ยังไม่มีเลขอั้นสำหรับงวดนี้</div>
+    : <Table
+        columns={[
+          { key: "betType", label: "ประเภท", render: v => BET_TYPES.find(b => b.id === v)?.label },
+          { key: "number", label: "เลข", render: v => <span style={{ fontFamily: "monospace", fontSize: 18, letterSpacing: 4, color: "#fbbf24" }}>{v}</span> },
+          { key: "limit", label: "ยอดจำกัด", render: v => v ? `฿${Number(v).toLocaleString()}` : "-" },
+          { key: "rateOverride", label: "อัตราพิเศษ", render: v => v ? `฿${v}` : "-" },
+          { key: "isClosed", label: "สถานะ", render: v => <Badge status={v ? "closed" : "open"} /> },
+          { key: "number", label: "", render: (v, row) => (
+            <button onClick={() => setLimits(limits.filter(l => l !== row))}
+              style={{ background: "none", border: "none", color: "#ef4444", cursor: "pointer", fontSize: 13 }}>ลบ</button>
+          )},
+        ]}
+        data={limits}
+      />
+  }
+</div>
+
+{/* ── Modal ── */}
+{showLimitModal && (
+  <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+    <div style={{ background: "#0a0f1e", border: "1px solid #1e293b", borderRadius: 16, padding: 28, width: 460 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 20 }}>
+        <span style={{ color: "#fff", fontWeight: 700, fontSize: 16 }}>เพิ่มเลขอั้น</span>
+        <button onClick={() => setShowLimitModal(false)} style={{ background: "none", border: "none", color: "#64748b", cursor: "pointer", fontSize: 18 }}>✕</button>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+        {[
+          { label: "ประเภทการแทง", key: "betType", type: "select" },
+          { label: "เลข", key: "number", placeholder: "เช่น 456" },
+          { label: "ยอดจำกัด (บาท)", key: "limit", placeholder: "เช่น 5000", type: "number" },
+          { label: "อัตราจ่ายพิเศษ", key: "rateOverride", placeholder: "เช่น 500", type: "number" },
+        ].map((f, i) => (
+          <div key={i}>
+            <div style={{ color: "#64748b", fontSize: 12, marginBottom: 6 }}>{f.label}</div>
+            {f.type === "select"
+              ? <select value={limitForm.betType} onChange={e => setLimitForm({ ...limitForm, betType: e.target.value })}
+                  style={{ width: "100%", background: "#0f172a", border: "1px solid #1e293b", borderRadius: 8, padding: "8px 12px", color: "#cbd5e1", outline: "none", boxSizing: "border-box" }}>
+                  {BET_TYPES.map(b => <option key={b.id} value={b.id}>{b.label}</option>)}
+                </select>
+              : <input type={f.type || "text"} placeholder={f.placeholder} value={limitForm[f.key]}
+                  onChange={e => setLimitForm({ ...limitForm, [f.key]: e.target.value })}
+                  style={{ width: "100%", background: "#0f172a", border: "1px solid #1e293b", borderRadius: 8, padding: "8px 12px", color: "#cbd5e1", outline: "none", boxSizing: "border-box" }} />
+            }
+          </div>
+        ))}
+      </div>
+
+      <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16, cursor: "pointer" }}>
+        <input type="checkbox" checked={limitForm.isClosed}
+          onChange={e => setLimitForm({ ...limitForm, isClosed: e.target.checked })} />
+        <span style={{ color: "#cbd5e1", fontSize: 13 }}>ปิดรับแทงเลขนี้ทันที</span>
+      </label>
+
+      {limitErr && <div style={{ color: "#ef4444", fontSize: 12, marginBottom: 10 }}>{limitErr}</div>}
+
+      <div style={{ display: "flex", gap: 8 }}>
+        <button onClick={saveLimitItem}
+          style={{ flex: 1, background: "#ef4444", color: "#fff", border: "none", borderRadius: 8, padding: 12, cursor: "pointer", fontWeight: 700 }}>
+          บันทึก
+        </button>
+        <button onClick={() => setShowLimitModal(false)}
+          style={{ background: "#1e293b", color: "#94a3b8", border: "1px solid #334155", borderRadius: 8, padding: "12px 20px", cursor: "pointer" }}>
+          ยกเลิก
+        </button>
       </div>
     </div>
-  );
+  </div>
+)}
 };
 
 // ─── Finance Page ─────────────────────────────────────────────
