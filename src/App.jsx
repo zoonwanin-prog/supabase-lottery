@@ -1,53 +1,252 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
+import { createClient } from "@supabase/supabase-js";
 
-// ─── Mock Data ────────────────────────────────────────────────
-const LOTTERY_TYPES = [
-  { id: 1, name: "หวยรัฐบาลไทย", nameEn: "Thai Lotto", status: "open", nextDraw: "01/05/2569", closeTime: "15:20" },
-  { id: 2, name: "หวยออมสิน", nameEn: "GSB Lottery", status: "upcoming", nextDraw: "16/05/2569", closeTime: "15:20" },
-  { id: 3, name: "หวยลาว", nameEn: "Laos Lottery", status: "open", nextDraw: "08/04/2569", closeTime: "20:00" },
-  { id: 4, name: "หวยฮานอย", nameEn: "Hanoi Lottery", status: "open", nextDraw: "08/04/2569", closeTime: "18:30" },
-  { id: 5, name: "ยี่กี", nameEn: "Yeekee", status: "open", nextDraw: "08/04/2569", closeTime: "ทุก 15 นาที" },
-  { id: 6, name: "หวยหุ้นไทย เช้า", nameEn: "Thai Stock AM", status: "resulted", nextDraw: "09/04/2569", closeTime: "11:00" },
-];
+// ─── Supabase Client ──────────────────────────────────────────
+const supabase = createClient(
+  import.meta.env.VITE_SUPABASE_URL,
+  import.meta.env.VITE_SUPABASE_ANON_KEY
+);
 
-const BET_TYPES = [
-  { id: "three_top", label: "3 ตัวบน", rate: 950, maxBet: 20000 },
-  { id: "three_front", label: "3 ตัวหน้า", rate: 450, maxBet: 100 },
-  { id: "three_bottom", label: "3 ตัวล่าง", rate: 450, maxBet: 100 },
-  { id: "three_tod", label: "3 ตัวโต๊ด", rate: 150, maxBet: 500 },
-  { id: "two_top", label: "2 ตัวบน", rate: 100, maxBet: 1000 },
-  { id: "two_bottom", label: "2 ตัวล่าง", rate: 100, maxBet: 1000 },
-  { id: "run_top", label: "วิ่งบน", rate: 32, maxBet: 10000 },
-  { id: "run_bottom", label: "วิ่งล่าง", rate: 42, maxBet: 10000 },
-];
+// ─── Hooks ────────────────────────────────────────────────────
 
-const MOCK_MEMBERS = [
-  { id: 190, phone: "0804950385", name: "กะเด มนายหลี", balance: 1000, status: "Active", agent: "ไม่มีผู้แนะนำ", regDate: "16/08/2025 05:39" },
-  { id: 191, phone: "0985140192", name: "อนุรักษ์ จันทร์แก้ว", balance: 1000, status: "Active", agent: "ไม่มีผู้แนะนำ", regDate: "16/08/2025 05:39" },
-  { id: 192, phone: "0932347207", name: "กีรพล สอนดี", balance: 1000, status: "Active", agent: "ไม่มีผู้แนะนำ", regDate: "16/08/2025 05:39" },
-  { id: 193, phone: "0623540067", name: "เมษนุช ตอมฝุ่ง", balance: 1000, status: "Active", agent: "ไม่มีผู้แนะนำ", regDate: "16/08/2025 05:39" },
-  { id: 194, phone: "0809187194", name: "สมชาย โต้งสูงเนิน", balance: 1000, status: "Active", agent: "ไม่มีผู้แนะนำ", regDate: "16/08/2025 05:39" },
-  { id: 195, phone: "0886397200", name: "นิรินทร์ วันดี", balance: 1000, status: "Active", agent: "ไม่มีผู้แนะนำ", regDate: "16/08/2025 05:39" },
-];
+function useDashboardStats() {
+  const [stats, setStats] = useState({ totalBetToday: 0, totalWinToday: 0, totalMembers: 0, pendingWithdrawCount: 0, pendingWithdrawAmount: 0 });
+  const [loading, setLoading] = useState(true);
+  const fetch = useCallback(async () => {
+    setLoading(true);
+    const today = new Date().toISOString().split("T")[0];
+    const [mRes, bRes, wRes] = await Promise.all([
+      supabase.from("profiles").select("id", { count: "exact" }).eq("role", "player"),
+      supabase.from("bet_slips").select("total_amount,total_win").gte("created_at", today),
+      supabase.from("transactions").select("amount", { count: "exact" }).eq("type", "withdraw").eq("status", "pending"),
+    ]);
+    setStats({
+      totalBetToday: bRes.data?.reduce((s, r) => s + (r.total_amount || 0), 0) || 0,
+      totalWinToday: bRes.data?.reduce((s, r) => s + (r.total_win || 0), 0) || 0,
+      totalMembers: mRes.count || 0,
+      pendingWithdrawCount: wRes.count || 0,
+      pendingWithdrawAmount: wRes.data?.reduce((s, r) => s + (r.amount || 0), 0) || 0,
+    });
+    setLoading(false);
+  }, []);
+  useEffect(() => { fetch(); }, [fetch]);
+  return { stats, loading, refresh: fetch };
+}
 
-const MOCK_BETS = [
-  { id: "SL20250408001", lottery: "หวยรัฐบาลไทย", type: "3 ตัวบน", number: "456", amount: 100, rate: 950, potential: 95000, status: "pending", date: "08/04/2569 09:15" },
-  { id: "SL20250408002", lottery: "หวยรัฐบาลไทย", type: "2 ตัวล่าง", number: "56", amount: 200, rate: 100, potential: 20000, status: "won", date: "08/04/2569 09:10" },
-  { id: "SL20250407001", lottery: "หวยลาว", type: "2 ตัวบน", number: "12", amount: 50, rate: 90, potential: 4500, status: "lost", date: "07/04/2569 18:00" },
-];
+function useMembers() {
+  const [members, setMembers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const fetch = useCallback(async () => {
+    setLoading(true);
+    const { data } = await supabase
+      .from("profiles")
+      .select("id,username,full_name,phone,role,status,balance,created_at,agent:agent_id(username)")
+      .order("created_at", { ascending: false });
+    if (data) setMembers(data);
+    setLoading(false);
+  }, []);
+  useEffect(() => { fetch(); }, [fetch]);
 
-const MOCK_TRANSACTIONS = [
-  { id: "TX20250408001", type: "deposit", amount: 5000, status: "approved", user: "0804950385", date: "08/04/2569 09:00", bank: "กสิกรไทย" },
-  { id: "TX20250408002", type: "withdraw", amount: 2000, status: "pending", user: "0985140192", date: "08/04/2569 10:30", bank: "ไทยพาณิชย์" },
-  { id: "TX20250408003", type: "win", amount: 20000, status: "approved", user: "0932347207", date: "08/04/2569 11:00", bank: "-" },
-];
+  async function addMember({ username, full_name, password, phone, role = "player" }) {
+    const { data: authData, error: authErr } = await supabase.auth.admin.createUser({
+      email: `${username}@lottery.local`,
+      password,
+      user_metadata: { username, full_name, phone },
+    });
+    if (authErr) return { error: authErr };
+    const { error } = await supabase.from("profiles").insert({
+      id: authData.user.id, username, full_name, phone, role,
+    });
+    if (!error) fetch();
+    return { error };
+  }
 
-const MOCK_REPORT = [
-  { game: "หวยรัฐบาลไทย", totalBet: 312, winLoss: 312, playerBet: -95, playerWin: -95, agentBet: 217, agentWin: -217, systemShare: 299.52, systemWin: 95 },
-  { game: "หวยออนไลน์", totalBet: 0, winLoss: 0, playerBet: 0, playerWin: 0, agentBet: 0, agentWin: 0, systemShare: 0, systemWin: 0 },
-];
+  async function updateStatus(id, status) {
+    const { error } = await supabase.from("profiles").update({ status }).eq("id", id);
+    if (!error) fetch();
+    return { error };
+  }
 
-// ─── Icons ────────────────────────────────────────────────────
+  return { members, loading, refresh: fetch, addMember, updateStatus };
+}
+
+function useLotteryGroups() {
+  const [groups, setGroups] = useState([]);
+  useEffect(() => {
+    supabase.from("lottery_groups").select("*").order("sort_order").then(({ data }) => { if (data) setGroups(data); });
+  }, []);
+  return { groups };
+}
+
+function useLotteryDraws(groupId) {
+  const [draws, setDraws] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const fetch = useCallback(async () => {
+    setLoading(true);
+    let q = supabase.from("lottery_draws").select("*,lottery_group:lottery_group_id(name,slug)").order("draw_date", { ascending: false }).limit(20);
+    if (groupId) q = q.eq("lottery_group_id", groupId);
+    const { data } = await q;
+    if (data) setDraws(data);
+    setLoading(false);
+  }, [groupId]);
+  useEffect(() => { fetch(); }, [fetch]);
+
+  async function updateStatus(id, status) {
+    const { error } = await supabase.from("lottery_draws").update({ status, updated_at: new Date().toISOString() }).eq("id", id);
+    if (!error) fetch();
+    return { error };
+  }
+
+  async function setResult(id, result) {
+    const { data, error } = await supabase.rpc("process_lottery_results", {
+      p_draw_id: id,
+      p_result_three_top: result.three_top,
+      p_result_three_front1: result.three_front1,
+      p_result_three_front2: result.three_front2,
+      p_result_three_bottom1: result.three_bottom1,
+      p_result_three_bottom2: result.three_bottom2,
+      p_result_two_top: result.two_top,
+      p_result_two_bottom: result.two_bottom,
+    });
+    if (!error) fetch();
+    return { data, error };
+  }
+
+  return { draws, loading, refresh: fetch, updateStatus, setResult };
+}
+
+function useRateSettings() {
+  const [rates, setRates] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const fetch = useCallback(async () => {
+    setLoading(true);
+    const { data } = await supabase.from("rate_settings").select("*").order("bet_type");
+    if (data) setRates(data);
+    setLoading(false);
+  }, []);
+  useEffect(() => { fetch(); }, [fetch]);
+
+  async function updateRate(id, payout_rate) {
+    const { error } = await supabase.from("rate_settings").update({ payout_rate, updated_at: new Date().toISOString() }).eq("id", id);
+    if (!error) fetch();
+    return { error };
+  }
+
+  return { rates, loading, refresh: fetch, updateRate };
+}
+
+function useNumberLimits(drawId) {
+  const [limits, setLimits] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const fetch = useCallback(async () => {
+    if (!drawId) { setLimits([]); setLoading(false); return; }
+    setLoading(true);
+    const { data } = await supabase.from("number_limits").select("*").eq("lottery_draw_id", drawId).order("created_at", { ascending: false });
+    if (data) setLimits(data);
+    setLoading(false);
+  }, [drawId]);
+  useEffect(() => { fetch(); }, [fetch]);
+
+  async function addLimit(form) {
+    const { error } = await supabase.from("number_limits").upsert({
+      lottery_draw_id: drawId,
+      bet_type: form.betType,
+      number: form.number,
+      original_limit: form.limit ? Number(form.limit) : null,
+      remaining_limit: form.limit ? Number(form.limit) : null,
+      payout_rate_override: form.rateOverride ? Number(form.rateOverride) : null,
+      is_closed: form.isClosed,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "lottery_draw_id,bet_type,number" });
+    if (!error) fetch();
+    return { error };
+  }
+
+  async function removeLimit(id) {
+    const { error } = await supabase.from("number_limits").delete().eq("id", id);
+    if (!error) fetch();
+    return { error };
+  }
+
+  return { limits, loading, refresh: fetch, addLimit, removeLimit };
+}
+
+function useBetSlips() {
+  const [slips, setSlips] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const fetch = useCallback(async () => {
+    setLoading(true);
+    const { data } = await supabase
+      .from("bet_slips")
+      .select("*,user:user_id(username,phone),draw:lottery_draw_id(draw_date,lottery_group:lottery_group_id(name)),bet_items(*)")
+      .order("created_at", { ascending: false })
+      .limit(100);
+    if (data) setSlips(data);
+    setLoading(false);
+  }, []);
+  useEffect(() => {
+    fetch();
+    const ch = supabase.channel("bet_slips_rt").on("postgres_changes", { event: "*", schema: "public", table: "bet_slips" }, fetch).subscribe();
+    return () => supabase.removeChannel(ch);
+  }, [fetch]);
+  return { slips, loading, refresh: fetch };
+}
+
+function useTransactions(typeFilter) {
+  const [transactions, setTransactions] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const fetch = useCallback(async () => {
+    setLoading(true);
+    let q = supabase.from("transactions").select("*,user:user_id(username,phone,full_name),bank_account:bank_account_id(bank_name,account_number)").order("created_at", { ascending: false }).limit(100);
+    if (typeFilter) q = q.eq("type", typeFilter);
+    const { data } = await q;
+    if (data) setTransactions(data);
+    setLoading(false);
+  }, [typeFilter]);
+  useEffect(() => {
+    fetch();
+    const ch = supabase.channel("transactions_rt").on("postgres_changes", { event: "*", schema: "public", table: "transactions" }, fetch).subscribe();
+    return () => supabase.removeChannel(ch);
+  }, [fetch]);
+
+  async function approve(id) {
+    const { error } = await supabase.from("transactions").update({ status: "approved", approved_at: new Date().toISOString() }).eq("id", id);
+    if (!error) fetch();
+    return { error };
+  }
+
+  async function reject(id) {
+    const { error } = await supabase.from("transactions").update({ status: "rejected" }).eq("id", id);
+    if (!error) fetch();
+    return { error };
+  }
+
+  return { transactions, loading, refresh: fetch, approve, reject };
+}
+
+function useDailySummary() {
+  const [summary, setSummary] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const fetch = useCallback(async () => {
+    setLoading(true);
+    const { data } = await supabase.from("daily_summary").select("*,lottery_group:lottery_group_id(name)").order("summary_date", { ascending: false }).limit(30);
+    if (data) setSummary(data);
+    setLoading(false);
+  }, []);
+  useEffect(() => { fetch(); }, [fetch]);
+  return { summary, loading, refresh: fetch };
+}
+
+// ─── UI Helpers ───────────────────────────────────────────────
+
+const BET_TYPE_LABELS = {
+  three_top: "3 ตัวบน", three_front: "3 ตัวหน้า", three_bottom: "3 ตัวล่าง",
+  three_tod: "3 ตัวโต๊ด", two_top: "2 ตัวบน", two_bottom: "2 ตัวล่าง",
+  two_tod: "2 ตัวโต๊ด", run_top: "วิ่งบน", run_bottom: "วิ่งล่าง",
+};
+
+const BET_TYPES = Object.entries(BET_TYPE_LABELS).map(([id, label]) => ({ id, label }));
+
 const Icon = ({ name, size = 18 }) => {
   const icons = {
     dashboard: "M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z M9 22V12h6v10",
@@ -60,14 +259,12 @@ const Icon = ({ name, size = 18 }) => {
     add: "M12 4v16m8-8H4",
     search: "M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z",
     close: "M6 18L18 6M6 6l12 12",
-    check: "M5 13l4 4L19 7",
-    edit: "M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z",
-    alert: "M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z",
-    arrow_down: "M19 9l-7 7-7-7",
     refresh: "M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15",
+    edit: "M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z",
+    logout: "M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1",
+    win: "M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z",
     deposit: "M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z",
     withdraw: "M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z",
-    win: "M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z",
   };
   return (
     <svg width={size} height={size} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
@@ -76,22 +273,29 @@ const Icon = ({ name, size = 18 }) => {
   );
 };
 
-// ─── Status Badge ─────────────────────────────────────────────
-const Badge = ({ status, labels }) => {
+const Badge = ({ status }) => {
   const map = {
-    open: { bg: "#0d4f2b", color: "#4ade80", text: "เปิดรับแทง" },
-    upcoming: { bg: "#1e3a5f", color: "#60a5fa", text: "เร็วๆนี้" },
-    resulted: { bg: "#2d1b4e", color: "#a78bfa", text: "ออกผลแล้ว" },
-    closed: { bg: "#4a1414", color: "#f87171", text: "ปิดรับ" },
-    Active: { bg: "#0d4f2b", color: "#4ade80", text: "Active" },
-    approved: { bg: "#0d4f2b", color: "#4ade80", text: "อนุมัติ" },
-    pending: { bg: "#3d2a00", color: "#fbbf24", text: "รอดำเนินการ" },
-    rejected: { bg: "#4a1414", color: "#f87171", text: "ปฏิเสธ" },
-    won: { bg: "#0d4f2b", color: "#4ade80", text: "ถูกรางวัล" },
-    lost: { bg: "#4a1414", color: "#f87171", text: "ไม่ถูก" },
-    deposit: { bg: "#0d3d2b", color: "#34d399", text: "ฝากเงิน" },
-    withdraw: { bg: "#3d1a00", color: "#fb923c", text: "ถอนเงิน" },
-    win: { bg: "#0d4f2b", color: "#4ade80", text: "รางวัล" },
+    open:      { bg: "#0d4f2b", color: "#4ade80", text: "เปิดรับแทง" },
+    upcoming:  { bg: "#1e3a5f", color: "#60a5fa", text: "เร็วๆนี้" },
+    resulted:  { bg: "#2d1b4e", color: "#a78bfa", text: "ออกผลแล้ว" },
+    closed:    { bg: "#4a1414", color: "#f87171", text: "ปิดรับ" },
+    cancelled: { bg: "#3d2a00", color: "#fbbf24", text: "ยกเลิก" },
+    active:    { bg: "#0d4f2b", color: "#4ade80", text: "Active" },
+    Active:    { bg: "#0d4f2b", color: "#4ade80", text: "Active" },
+    inactive:  { bg: "#1e293b", color: "#94a3b8", text: "Inactive" },
+    suspended: { bg: "#4a1414", color: "#f87171", text: "ระงับ" },
+    approved:  { bg: "#0d4f2b", color: "#4ade80", text: "อนุมัติ" },
+    pending:   { bg: "#3d2a00", color: "#fbbf24", text: "รอดำเนินการ" },
+    rejected:  { bg: "#4a1414", color: "#f87171", text: "ปฏิเสธ" },
+    processing:{ bg: "#1e3a5f", color: "#60a5fa", text: "กำลังดำเนินการ" },
+    won:       { bg: "#0d4f2b", color: "#4ade80", text: "ถูกรางวัล" },
+    lost:      { bg: "#4a1414", color: "#f87171", text: "ไม่ถูก" },
+    deposit:   { bg: "#0d3d2b", color: "#34d399", text: "ฝากเงิน" },
+    withdraw:  { bg: "#3d1a00", color: "#fb923c", text: "ถอนเงิน" },
+    win:       { bg: "#0d4f2b", color: "#4ade80", text: "รางวัล" },
+    player:    { bg: "#1e293b", color: "#94a3b8", text: "ผู้เล่น" },
+    agent:     { bg: "#1e3a5f", color: "#60a5fa", text: "เอเย่นต์" },
+    admin:     { bg: "#2d1b4e", color: "#a78bfa", text: "แอดมิน" },
   };
   const cfg = map[status] || { bg: "#1e293b", color: "#94a3b8", text: status };
   return (
@@ -101,20 +305,22 @@ const Badge = ({ status, labels }) => {
   );
 };
 
-// ─── Stat Card ────────────────────────────────────────────────
 const StatCard = ({ label, value, sub, color = "#00d4aa", icon }) => (
   <div style={{ background: "#0f172a", border: "1px solid #1e293b", borderRadius: 12, padding: "18px 20px", flex: 1, minWidth: 160 }}>
     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-      <span style={{ color: color, opacity: 0.7 }}><Icon name={icon} size={16} /></span>
+      <span style={{ color, opacity: 0.7 }}><Icon name={icon} size={16} /></span>
       <span style={{ color: "#64748b", fontSize: 13 }}>{label}</span>
     </div>
-    <div style={{ color: color, fontSize: 26, fontWeight: 800, fontFamily: "monospace", letterSpacing: -1 }}>{value}</div>
+    <div style={{ color, fontSize: 26, fontWeight: 800, fontFamily: "monospace", letterSpacing: -1 }}>{value}</div>
     {sub && <div style={{ color: "#475569", fontSize: 12, marginTop: 4 }}>{sub}</div>}
   </div>
 );
 
-// ─── Table ────────────────────────────────────────────────────
-const Table = ({ columns, data, onAction }) => (
+const Spinner = () => (
+  <div style={{ textAlign: "center", padding: 40, color: "#475569" }}>กำลังโหลด...</div>
+);
+
+const Table = ({ columns, data }) => (
   <div style={{ overflowX: "auto" }}>
     <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
       <thead>
@@ -127,508 +333,743 @@ const Table = ({ columns, data, onAction }) => (
         </tr>
       </thead>
       <tbody>
-        {data.length === 0 ? (
-          <tr><td colSpan={columns.length} style={{ color: "#475569", textAlign: "center", padding: 32 }}>ไม่มีข้อมูล</td></tr>
-        ) : data.map((row, ri) => (
-          <tr key={ri} style={{ borderBottom: "1px solid #0f172a" }}
-            onMouseEnter={e => e.currentTarget.style.background = "#0f172a"}
-            onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-            {columns.map((col, ci) => (
-              <td key={ci} style={{ padding: "10px 12px", color: "#cbd5e1", whiteSpace: "nowrap" }}>
-                {col.render ? col.render(row[col.key], row) : row[col.key]}
-              </td>
-            ))}
-          </tr>
-        ))}
+        {data.length === 0
+          ? <tr><td colSpan={columns.length} style={{ color: "#475569", textAlign: "center", padding: 32 }}>ไม่มีข้อมูล</td></tr>
+          : data.map((row, ri) => (
+            <tr key={ri} style={{ borderBottom: "1px solid #0f172a" }}>
+              {columns.map((col, ci) => (
+                <td key={ci} style={{ padding: "10px 12px", color: "#cbd5e1", whiteSpace: "nowrap" }}>
+                  {col.render ? col.render(row[col.key], row) : (row[col.key] ?? "-")}
+                </td>
+              ))}
+            </tr>
+          ))}
       </tbody>
     </table>
   </div>
 );
 
-// ─── Dashboard Page ───────────────────────────────────────────
-const DashboardPage = () => (
-  <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-    <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-      <StatCard label="ยอดแทงวันนี้" value="฿312.00" sub="2 รายการ" color="#00d4aa" icon="bet" />
-      <StatCard label="แพ้/ชนะ" value="฿95.00" sub="กำไรสุทธิ" color="#4ade80" icon="win" />
-      <StatCard label="สมาชิกทั้งหมด" value="25" sub="Active ทั้งหมด" color="#60a5fa" icon="members" />
-      <StatCard label="รอถอนเงิน" value="฿2,000" sub="1 รายการ" color="#fbbf24" icon="withdraw" />
-    </div>
-
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-      {/* Win/Loss Report */}
-      <div style={{ background: "#0a0f1e", border: "1px solid #1e293b", borderRadius: 12, padding: 16, gridColumn: "1 / -1" }}>
-        <div style={{ color: "#94a3b8", fontWeight: 700, marginBottom: 12, fontSize: 14 }}>รายงานแพ้/ชนะ ระบบ — วันนี้</div>
-        <Table
-          columns={[
-            { key: "game", label: "เกมส์" },
-            { key: "totalBet", label: "เดิมพันรวม", render: v => <span style={{ color: "#4ade80" }}>฿{v}</span> },
-            { key: "winLoss", label: "แพ้/ชนะ", render: v => <span style={{ color: "#4ade80" }}>฿{v}</span> },
-            { key: "playerBet", label: "ผู้เล่น เดิมพัน", render: v => <span style={{ color: v < 0 ? "#f87171" : "#4ade80" }}>฿{v}</span> },
-            { key: "agentBet", label: "เอเย่นต์ เดิมพัน", render: v => <span style={{ color: "#60a5fa" }}>฿{v}</span> },
-            { key: "systemWin", label: "บริษัท ชนะ", render: v => <span style={{ color: "#4ade80" }}>฿{v}</span> },
-          ]}
-          data={MOCK_REPORT}
-        />
+const Modal = ({ title, onClose, children }) => (
+  <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+    <div style={{ background: "#0a0f1e", border: "1px solid #1e293b", borderRadius: 16, padding: 28, width: 480, maxWidth: "90vw", maxHeight: "90vh", overflowY: "auto" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+        <span style={{ color: "#fff", fontWeight: 700, fontSize: 16 }}>{title}</span>
+        <button onClick={onClose} style={{ background: "none", border: "none", color: "#64748b", cursor: "pointer" }}><Icon name="close" /></button>
       </div>
-
-      {/* Recent Transactions */}
-      <div style={{ background: "#0a0f1e", border: "1px solid #1e293b", borderRadius: 12, padding: 16 }}>
-        <div style={{ color: "#94a3b8", fontWeight: 700, marginBottom: 12, fontSize: 14 }}>ธุรกรรมล่าสุด</div>
-        {MOCK_TRANSACTIONS.map((tx, i) => (
-          <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid #0f172a" }}>
-            <div>
-              <div style={{ color: "#cbd5e1", fontSize: 13 }}>{tx.user}</div>
-              <div style={{ color: "#475569", fontSize: 11 }}>{tx.date}</div>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ color: tx.type === "deposit" ? "#4ade80" : tx.type === "win" ? "#a78bfa" : "#fb923c", fontWeight: 700 }}>
-                {tx.type === "deposit" ? "+" : tx.type === "win" ? "+" : "-"}฿{tx.amount.toLocaleString()}
-              </span>
-              <Badge status={tx.status} />
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Active Lotteries */}
-      <div style={{ background: "#0a0f1e", border: "1px solid #1e293b", borderRadius: 12, padding: 16 }}>
-        <div style={{ color: "#94a3b8", fontWeight: 700, marginBottom: 12, fontSize: 14 }}>หวยที่เปิดรับแทง</div>
-        {LOTTERY_TYPES.filter(l => l.status === "open").map((lottery, i) => (
-          <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid #0f172a" }}>
-            <div>
-              <div style={{ color: "#cbd5e1", fontSize: 13, fontWeight: 600 }}>{lottery.name}</div>
-              <div style={{ color: "#475569", fontSize: 11 }}>ปิดรับ {lottery.closeTime} น.</div>
-            </div>
-            <Badge status="open" />
-          </div>
-        ))}
-      </div>
+      {children}
     </div>
   </div>
 );
 
+const Input = ({ label, ...props }) => (
+  <div>
+    {label && <div style={{ color: "#64748b", fontSize: 12, marginBottom: 6 }}>{label}</div>}
+    <input {...props} style={{ width: "100%", background: "#0f172a", border: "1px solid #1e293b", borderRadius: 8, padding: "9px 12px", color: "#cbd5e1", outline: "none", boxSizing: "border-box", fontFamily: "inherit", fontSize: 13 }} />
+  </div>
+);
+
+const Select = ({ label, children, ...props }) => (
+  <div>
+    {label && <div style={{ color: "#64748b", fontSize: 12, marginBottom: 6 }}>{label}</div>}
+    <select {...props} style={{ width: "100%", background: "#0f172a", border: "1px solid #1e293b", borderRadius: 8, padding: "9px 12px", color: "#cbd5e1", outline: "none", boxSizing: "border-box", fontFamily: "inherit", fontSize: 13 }}>
+      {children}
+    </select>
+  </div>
+);
+
+const Btn = ({ children, onClick, variant = "primary", style: s = {} }) => {
+  const variants = {
+    primary: { background: "#00d4aa", color: "#000", border: "none" },
+    danger:  { background: "#ef4444", color: "#fff", border: "none" },
+    ghost:   { background: "#1e293b", color: "#94a3b8", border: "1px solid #334155" },
+    approve: { background: "#0d4f2b", color: "#4ade80", border: "1px solid #166534" },
+    reject:  { background: "#4a1414", color: "#f87171", border: "1px solid #7f1d1d" },
+  };
+  return (
+    <button onClick={onClick} style={{ borderRadius: 8, padding: "8px 16px", cursor: "pointer", fontWeight: 600, fontSize: 13, fontFamily: "inherit", ...variants[variant], ...s }}>
+      {children}
+    </button>
+  );
+};
+
+const fmtDate = (d) => d ? new Date(d).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" }) : "-";
+const fmtMoney = (n) => `฿${Number(n || 0).toLocaleString()}`;
+
+// ─── Login Page ───────────────────────────────────────────────
+const LoginPage = ({ onLogin }) => {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleLogin = async () => {
+    setError("");
+    setLoading(true);
+    const { data, error: err } = await supabase.auth.signInWithPassword({ email, password });
+    if (err) { setError(err.message); setLoading(false); return; }
+    onLogin(data.user);
+  };
+
+  return (
+    <div style={{ minHeight: "100vh", background: "#060c18", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'IBM Plex Sans Thai', 'Sarabun', sans-serif" }}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;600;700&display=swap');`}</style>
+      <div style={{ background: "#0a0f1e", border: "1px solid #1e293b", borderRadius: 20, padding: 40, width: 380 }}>
+        <div style={{ textAlign: "center", marginBottom: 32 }}>
+          <div style={{ fontSize: 40, marginBottom: 12 }}>🎰</div>
+          <div style={{ color: "#fff", fontWeight: 800, fontSize: 22 }}>LottoPro Admin</div>
+          <div style={{ color: "#475569", fontSize: 13, marginTop: 4 }}>ระบบจัดการหวย</div>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <Input label="อีเมล" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="admin@example.com" />
+          <Input label="รหัสผ่าน" type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••"
+            onKeyDown={e => e.key === "Enter" && handleLogin()} />
+          {error && <div style={{ color: "#f87171", fontSize: 12 }}>{error}</div>}
+          <Btn onClick={handleLogin} style={{ width: "100%", padding: 12, fontSize: 15, marginTop: 4 }}>
+            {loading ? "กำลังเข้าสู่ระบบ..." : "เข้าสู่ระบบ"}
+          </Btn>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ─── Dashboard Page ───────────────────────────────────────────
+const DashboardPage = () => {
+  const { stats, loading, refresh } = useDashboardStats();
+  const { transactions } = useTransactions("withdraw");
+  const { slips } = useBetSlips();
+
+  const pendingTx = transactions.filter(t => t.status === "pending").slice(0, 5);
+  const recentSlips = slips.slice(0, 5);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+        <StatCard label="ยอดแทงวันนี้" value={loading ? "..." : fmtMoney(stats.totalBetToday)} color="#00d4aa" icon="bet" />
+        <StatCard label="กำไรสุทธิ" value={loading ? "..." : fmtMoney(stats.totalBetToday - stats.totalWinToday)} color="#4ade80" icon="win" />
+        <StatCard label="สมาชิกทั้งหมด" value={loading ? "..." : stats.totalMembers} color="#60a5fa" icon="members" />
+        <StatCard label="รอถอนเงิน" value={loading ? "..." : fmtMoney(stats.pendingWithdrawAmount)} sub={`${stats.pendingWithdrawCount} รายการ`} color="#fbbf24" icon="withdraw" />
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        <div style={{ background: "#0a0f1e", border: "1px solid #1e293b", borderRadius: 12, padding: 16 }}>
+          <div style={{ color: "#94a3b8", fontWeight: 700, marginBottom: 12, fontSize: 14 }}>รอถอนเงิน</div>
+          {pendingTx.length === 0
+            ? <div style={{ color: "#475569", textAlign: "center", padding: 16, fontSize: 13 }}>ไม่มีรายการรอ</div>
+            : pendingTx.map((tx, i) => (
+              <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid #0f172a" }}>
+                <div>
+                  <div style={{ color: "#cbd5e1", fontSize: 13 }}>{tx.user?.phone || tx.user?.username}</div>
+                  <div style={{ color: "#475569", fontSize: 11 }}>{fmtDate(tx.created_at)}</div>
+                </div>
+                <span style={{ color: "#fb923c", fontWeight: 700 }}>{fmtMoney(tx.amount)}</span>
+              </div>
+            ))
+          }
+        </div>
+
+        <div style={{ background: "#0a0f1e", border: "1px solid #1e293b", borderRadius: 12, padding: 16 }}>
+          <div style={{ color: "#94a3b8", fontWeight: 700, marginBottom: 12, fontSize: 14 }}>บิลล่าสุด</div>
+          {recentSlips.length === 0
+            ? <div style={{ color: "#475569", textAlign: "center", padding: 16, fontSize: 13 }}>ยังไม่มีบิล</div>
+            : recentSlips.map((s, i) => (
+              <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid #0f172a" }}>
+                <div>
+                  <div style={{ color: "#cbd5e1", fontSize: 13 }}>{s.user?.phone} — {s.draw?.lottery_group?.name}</div>
+                  <div style={{ color: "#475569", fontSize: 11 }}>{fmtDate(s.created_at)}</div>
+                </div>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <span style={{ color: "#00d4aa", fontWeight: 700 }}>{fmtMoney(s.total_amount)}</span>
+                  <Badge status={s.status} />
+                </div>
+              </div>
+            ))
+          }
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // ─── Members Page ─────────────────────────────────────────────
 const MembersPage = () => {
+  const { members, loading, addMember, updateStatus } = useMembers();
   const [search, setSearch] = useState("");
   const [showModal, setShowModal] = useState(false);
-  const filtered = MOCK_MEMBERS.filter(m => m.name.includes(search) || m.phone.includes(search));
+  const [form, setForm] = useState({ username: "", full_name: "", phone: "", password: "", role: "player" });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState("");
+
+  const filtered = members.filter(m =>
+    (m.full_name || "").includes(search) ||
+    (m.phone || "").includes(search) ||
+    (m.username || "").includes(search)
+  );
+
+  const handleAdd = async () => {
+    if (!form.username || !form.password) { setErr("กรุณากรอก Username และรหัสผ่าน"); return; }
+    setSaving(true);
+    const { error } = await addMember(form);
+    setSaving(false);
+    if (error) { setErr(error.message); return; }
+    setShowModal(false);
+    setForm({ username: "", full_name: "", phone: "", password: "", role: "player" });
+    setErr("");
+  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-        <StatCard label="ผู้เล่นทั้งหมด" value="25" color="#60a5fa" icon="members" />
-        <StatCard label="ผู้เล่นออนไลน์" value="-" color="#00d4aa" icon="members" />
-        <StatCard label="บัญชีถูกระงับ" value="-" color="#f87171" icon="alert" />
-        <StatCard label="จากการแนะนำ" value="-" color="#fbbf24" icon="members" />
+        <StatCard label="ผู้เล่นทั้งหมด" value={members.filter(m => m.role === "player").length} color="#60a5fa" icon="members" />
+        <StatCard label="เอเย่นต์" value={members.filter(m => m.role === "agent").length} color="#a78bfa" icon="members" />
+        <StatCard label="บัญชีถูกระงับ" value={members.filter(m => m.status === "suspended").length} color="#f87171" icon="members" />
       </div>
 
       <div style={{ background: "#0a0f1e", border: "1px solid #1e293b", borderRadius: 12, padding: 16 }}>
         <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
           <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 8, background: "#0f172a", border: "1px solid #1e293b", borderRadius: 8, padding: "8px 12px" }}>
-            <Icon name="search" size={16} /><input value={search} onChange={e => setSearch(e.target.value)} placeholder="ค้นหาผู้เล่น..." style={{ background: "none", border: "none", color: "#cbd5e1", outline: "none", flex: 1 }} />
+            <Icon name="search" size={16} />
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="ค้นหาสมาชิก..." style={{ background: "none", border: "none", color: "#cbd5e1", outline: "none", flex: 1, fontFamily: "inherit", fontSize: 13 }} />
           </div>
-          <button onClick={() => setShowModal(true)} style={{ background: "#00d4aa", color: "#000", border: "none", borderRadius: 8, padding: "8px 16px", cursor: "pointer", fontWeight: 700, display: "flex", alignItems: "center", gap: 6 }}>
-            <Icon name="add" size={16} /> เพิ่มสมาชิก
-          </button>
+          <Btn onClick={() => setShowModal(true)}><span style={{ display: "flex", alignItems: "center", gap: 6 }}><Icon name="add" size={15} /> เพิ่มสมาชิก</span></Btn>
         </div>
-        <Table
-          columns={[
-            { key: "id", label: "ID" },
-            { key: "regDate", label: "วันที่สมัคร" },
-            { key: "phone", label: "ชื่อผู้ใช้" },
-            { key: "name", label: "ชื่อ" },
-            { key: "balance", label: "กระเป๋า(หลัก)", render: v => `฿${v.toLocaleString()}` },
-            { key: "status", label: "สถานะ", render: v => <Badge status={v} /> },
-            { key: "agent", label: "แนะนำโดย" },
-            { key: "id", label: "จัดการ", render: (v, row) => (
-              <button style={{ background: "#1e293b", color: "#60a5fa", border: "1px solid #334155", borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontSize: 12 }}>จัดการ ▾</button>
-            )},
-          ]}
-          data={filtered}
-        />
+
+        {loading ? <Spinner /> : (
+          <Table
+            columns={[
+              { key: "username", label: "Username" },
+              { key: "full_name", label: "ชื่อ" },
+              { key: "phone", label: "เบอร์โทร" },
+              { key: "role", label: "Role", render: v => <Badge status={v} /> },
+              { key: "status", label: "สถานะ", render: v => <Badge status={v} /> },
+              { key: "balance", label: "ยอดเงิน", render: v => <span style={{ color: "#4ade80" }}>{fmtMoney(v)}</span> },
+              { key: "created_at", label: "วันที่สมัคร", render: v => fmtDate(v) },
+              { key: "id", label: "จัดการ", render: (v, row) => (
+                <div style={{ display: "flex", gap: 6 }}>
+                  {row.status !== "suspended"
+                    ? <Btn variant="reject" onClick={() => updateStatus(v, "suspended")} style={{ padding: "3px 10px", fontSize: 12 }}>ระงับ</Btn>
+                    : <Btn variant="approve" onClick={() => updateStatus(v, "active")} style={{ padding: "3px 10px", fontSize: 12 }}>เปิดใช้</Btn>
+                  }
+                </div>
+              )},
+            ]}
+            data={filtered}
+          />
+        )}
       </div>
 
       {showModal && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
-          <div style={{ background: "#0a0f1e", border: "1px solid #1e293b", borderRadius: 16, padding: 28, width: 420 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 20 }}>
-              <span style={{ color: "#fff", fontWeight: 700, fontSize: 16 }}>เพิ่มสมาชิกใหม่</span>
-              <button onClick={() => setShowModal(false)} style={{ background: "none", border: "none", color: "#64748b", cursor: "pointer" }}><Icon name="close" /></button>
+        <Modal title="เพิ่มสมาชิกใหม่" onClose={() => setShowModal(false)}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <Input label="Username *" value={form.username} onChange={e => setForm({ ...form, username: e.target.value })} placeholder="เบอร์โทร หรือ ชื่อผู้ใช้" />
+              <Input label="ชื่อ-นามสกุล" value={form.full_name} onChange={e => setForm({ ...form, full_name: e.target.value })} />
+              <Input label="เบอร์โทร" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} />
+              <Select label="Role" value={form.role} onChange={e => setForm({ ...form, role: e.target.value })}>
+                <option value="player">ผู้เล่น</option>
+                <option value="agent">เอเย่นต์</option>
+                <option value="admin">แอดมิน</option>
+              </Select>
+              <Input label="รหัสผ่าน *" type="password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} />
             </div>
-            {["ชื่อผู้ใช้ (เบอร์โทร)", "ชื่อ-นามสกุล", "รหัสผ่าน", "ยืนยันรหัสผ่าน"].map((label, i) => (
-              <div key={i} style={{ marginBottom: 14 }}>
-                <div style={{ color: "#64748b", fontSize: 12, marginBottom: 6 }}>{label}</div>
-                <input type={label.includes("รหัส") ? "password" : "text"} style={{ width: "100%", background: "#0f172a", border: "1px solid #1e293b", borderRadius: 8, padding: "10px 12px", color: "#cbd5e1", outline: "none", boxSizing: "border-box" }} />
-              </div>
-            ))}
-            <button style={{ width: "100%", background: "#00d4aa", color: "#000", border: "none", borderRadius: 8, padding: 12, cursor: "pointer", fontWeight: 700, marginTop: 8 }}>สร้างสมาชิก</button>
+            {err && <div style={{ color: "#f87171", fontSize: 12 }}>{err}</div>}
+            <div style={{ display: "flex", gap: 8 }}>
+              <Btn onClick={handleAdd} style={{ flex: 1, padding: 12 }}>{saving ? "กำลังสร้าง..." : "สร้างสมาชิก"}</Btn>
+              <Btn variant="ghost" onClick={() => setShowModal(false)}>ยกเลิก</Btn>
+            </div>
           </div>
-        </div>
+        </Modal>
       )}
     </div>
   );
 };
 
-// ─── Lottery Settings Page ────────────────────────────────────
+// ─── Lottery Page ─────────────────────────────────────────────
 const LotteryPage = () => {
-  const [selectedLottery, setSelectedLottery] = useState(LOTTERY_TYPES[0]);
-  const [showLimitModal, setShowLimitModal] = useState(false);
-const [limits, setLimits] = useState([]);
-const [limitForm, setLimitForm] = useState({
-  betType: 'three_top', number: '', limit: '', rateOverride: '', isClosed: false
-});
-const [limitErr, setLimitErr] = useState('');
+  const { groups } = useLotteryGroups();
+  const [selectedGroup, setSelectedGroup] = useState(null);
+  const { draws, loading, updateStatus, setResult } = useLotteryDraws(selectedGroup);
+  const { rates, updateRate } = useRateSettings();
 
-const saveLimitItem = () => {
-  if (!limitForm.number) return setLimitErr('กรุณากรอกเลข');
-  if (!limitForm.isClosed && !limitForm.limit) return setLimitErr('กรุณากรอกยอดจำกัด หรือเลือกปิดรับทันที');
-  setLimits([...limits, { ...limitForm }]);
-  setShowLimitModal(false);
-  setLimitForm({ betType: 'three_top', number: '', limit: '', rateOverride: '', isClosed: false });
-  setLimitErr('');
-};
+  // เลือก group แรกอัตโนมัติ
+  useEffect(() => { if (groups.length && !selectedGroup) setSelectedGroup(groups[0].id); }, [groups]);
+
+  const [selectedDraw, setSelectedDraw] = useState(null);
+  const { limits, addLimit, removeLimit } = useNumberLimits(selectedDraw);
+  const [showLimitModal, setShowLimitModal] = useState(false);
+  const [showResultModal, setShowResultModal] = useState(false);
+  const [limitForm, setLimitForm] = useState({ betType: "three_top", number: "", limit: "", rateOverride: "", isClosed: false });
+  const [resultForm, setResultForm] = useState({ three_top: "", three_front1: "", three_front2: "", three_bottom1: "", three_bottom2: "", two_top: "", two_bottom: "" });
+  const [limitErr, setLimitErr] = useState("");
+  const [editRateId, setEditRateId] = useState(null);
+  const [editRateVal, setEditRateVal] = useState("");
+
+  const handleSaveLimit = async () => {
+    if (!limitForm.number) { setLimitErr("กรุณากรอกเลข"); return; }
+    if (!limitForm.isClosed && !limitForm.limit) { setLimitErr("กรุณากรอกยอดจำกัด หรือเลือกปิดรับทันที"); return; }
+    const { error } = await addLimit(limitForm);
+    if (error) { setLimitErr(error.message); return; }
+    setShowLimitModal(false);
+    setLimitForm({ betType: "three_top", number: "", limit: "", rateOverride: "", isClosed: false });
+    setLimitErr("");
+  };
+
+  const handleSetResult = async () => {
+    if (!resultForm.three_top || !resultForm.two_top || !resultForm.two_bottom) { alert("กรุณากรอกผลหลักให้ครบ"); return; }
+    const { error } = await setResult(selectedDraw, resultForm);
+    if (error) { alert("เกิดข้อผิดพลาด: " + error.message); return; }
+    setShowResultModal(false);
+    setResultForm({ three_top: "", three_front1: "", three_front2: "", three_bottom1: "", three_bottom2: "", two_top: "", two_bottom: "" });
+  };
+
+  const currentDraw = draws.find(d => d.id === selectedDraw);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      {/* Tabs */}
+      {/* Group Tabs */}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        {LOTTERY_TYPES.map((l, i) => (
-          <button key={i} onClick={() => setSelectedLottery(l)} style={{
-            background: selectedLottery.id === l.id ? "#00d4aa" : "#0f172a",
-            color: selectedLottery.id === l.id ? "#000" : "#94a3b8",
-            border: "1px solid #1e293b", borderRadius: 8, padding: "8px 14px", cursor: "pointer", fontSize: 13, fontWeight: 600
-          }}>{l.name}</button>
+        {groups.map(g => (
+          <button key={g.id} onClick={() => { setSelectedGroup(g.id); setSelectedDraw(null); }}
+            style={{ background: selectedGroup === g.id ? "#00d4aa" : "#0f172a", color: selectedGroup === g.id ? "#000" : "#94a3b8", border: "1px solid #1e293b", borderRadius: 8, padding: "7px 14px", cursor: "pointer", fontSize: 13, fontWeight: 600, fontFamily: "inherit" }}>
+            {g.name}
+          </button>
         ))}
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-        {/* Lottery Info */}
-        <div style={{ background: "#0a0f1e", border: "1px solid #1e293b", borderRadius: 12, padding: 20 }}>
-          <div style={{ color: "#94a3b8", fontWeight: 700, marginBottom: 16, fontSize: 14 }}>ข้อมูลหวย: {selectedLottery.name}</div>
-          <div style={{ display: "flex", gap: 16, marginBottom: 16 }}>
-            {[{ label: "ชื่อ-ไทย", val: selectedLottery.name }, { label: "ชื่อ-อังกฤษ", val: selectedLottery.nameEn }].map((f, i) => (
-              <div key={i} style={{ flex: 1 }}>
-                <div style={{ color: "#64748b", fontSize: 12, marginBottom: 6 }}>{f.label}</div>
-                <input defaultValue={f.val} style={{ width: "100%", background: "#0f172a", border: "1px solid #1e293b", borderRadius: 8, padding: "8px 12px", color: "#cbd5e1", outline: "none", boxSizing: "border-box" }} />
+        {/* Draws List */}
+        <div style={{ background: "#0a0f1e", border: "1px solid #1e293b", borderRadius: 12, padding: 16 }}>
+          <div style={{ color: "#94a3b8", fontWeight: 700, marginBottom: 12, fontSize: 14 }}>งวดที่ผ่านมา</div>
+          {loading ? <Spinner /> : draws.length === 0
+            ? <div style={{ color: "#475569", textAlign: "center", padding: 24 }}>ไม่มีข้อมูล</div>
+            : draws.map(d => (
+              <div key={d.id} onClick={() => setSelectedDraw(d.id)}
+                style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 12px", borderRadius: 8, cursor: "pointer", marginBottom: 4, background: selectedDraw === d.id ? "#0f172a" : "transparent", border: selectedDraw === d.id ? "1px solid #1e293b" : "1px solid transparent" }}>
+                <div>
+                  <div style={{ color: "#cbd5e1", fontSize: 13, fontWeight: 600 }}>{d.draw_date}</div>
+                  <div style={{ color: "#475569", fontSize: 11 }}>ปิด: {fmtDate(d.close_at)}</div>
+                </div>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  {d.result_three_top && <span style={{ color: "#fbbf24", fontFamily: "monospace", fontWeight: 700 }}>{d.result_three_top}</span>}
+                  <Badge status={d.status} />
+                </div>
               </div>
-            ))}
-          </div>
-          <div style={{ color: "#64748b", fontSize: 12, marginBottom: 6 }}>งวดถัดไป / กำหนดออกผล</div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <input defaultValue={selectedLottery.nextDraw} style={{ flex: 1, background: "#0f172a", border: "1px solid #1e293b", borderRadius: 8, padding: "8px 12px", color: "#cbd5e1", outline: "none" }} />
-            <input defaultValue={selectedLottery.closeTime} style={{ width: 100, background: "#0f172a", border: "1px solid #1e293b", borderRadius: 8, padding: "8px 12px", color: "#cbd5e1", outline: "none" }} />
-          </div>
-          <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
-            <button style={{ flex: 1, background: "#00d4aa", color: "#000", border: "none", borderRadius: 8, padding: 10, cursor: "pointer", fontWeight: 700 }}>บันทึก</button>
-            <button style={{ background: "#1e293b", color: "#94a3b8", border: "1px solid #334155", borderRadius: 8, padding: "10px 16px", cursor: "pointer" }}>สถานะ: <Badge status={selectedLottery.status} /></button>
-          </div>
+            ))
+          }
         </div>
 
-        {/* Payout Rates */}
-        <div style={{ background: "#0a0f1e", border: "1px solid #1e293b", borderRadius: 12, padding: 20 }}>
-          <div style={{ color: "#94a3b8", fontWeight: 700, marginBottom: 16, fontSize: 14 }}>อัตราจ่าย</div>
-          <Table
-            columns={[
-              { key: "label", label: "ประเภท" },
-              { key: "rate", label: "อัตราจ่าย/บาท", render: v => <span style={{ color: "#fbbf24", fontWeight: 700 }}>฿{v}</span> },
-              { key: "maxBet", label: "สูงสุด/ครั้ง", render: v => `฿${v.toLocaleString()}` },
-              { key: "id", label: "แก้ไข", render: () => (
-                <button style={{ background: "none", border: "none", color: "#60a5fa", cursor: "pointer" }}><Icon name="edit" size={14} /></button>
-              )},
-            ]}
-            data={BET_TYPES}
-          />
+        {/* Draw Actions + Rate */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {selectedDraw && currentDraw && (
+            <div style={{ background: "#0a0f1e", border: "1px solid #1e293b", borderRadius: 12, padding: 16 }}>
+              <div style={{ color: "#94a3b8", fontWeight: 700, marginBottom: 12, fontSize: 14 }}>จัดการงวด: {currentDraw.draw_date}</div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {currentDraw.status === "upcoming" && <Btn onClick={() => updateStatus(selectedDraw, "open")}>เปิดรับแทง</Btn>}
+                {currentDraw.status === "open" && <Btn variant="danger" onClick={() => updateStatus(selectedDraw, "closed")}>ปิดรับแทง</Btn>}
+                {currentDraw.status === "closed" && <Btn onClick={() => setShowResultModal(true)}>บันทึกผลรางวัล</Btn>}
+                {currentDraw.status === "resulted" && (
+                  <div style={{ color: "#4ade80", fontSize: 13 }}>
+                    ✅ ผล: 3บน={currentDraw.result_three_top} | 2บน={currentDraw.result_two_top} | 2ล่าง={currentDraw.result_two_bottom}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Rates */}
+          <div style={{ background: "#0a0f1e", border: "1px solid #1e293b", borderRadius: 12, padding: 16 }}>
+            <div style={{ color: "#94a3b8", fontWeight: 700, marginBottom: 12, fontSize: 14 }}>อัตราจ่าย</div>
+            <Table
+              columns={[
+                { key: "bet_type", label: "ประเภท", render: v => BET_TYPE_LABELS[v] || v },
+                { key: "payout_rate", label: "อัตราจ่าย", render: (v, row) => editRateId === row.id
+                  ? <div style={{ display: "flex", gap: 6 }}>
+                      <input value={editRateVal} onChange={e => setEditRateVal(e.target.value)} style={{ width: 70, background: "#0f172a", border: "1px solid #1e293b", borderRadius: 6, padding: "4px 8px", color: "#fbbf24", fontFamily: "monospace", fontSize: 13 }} />
+                      <Btn variant="approve" onClick={async () => { await updateRate(row.id, Number(editRateVal)); setEditRateId(null); }} style={{ padding: "3px 8px", fontSize: 12 }}>✓</Btn>
+                    </div>
+                  : <span style={{ color: "#fbbf24", fontWeight: 700 }}>{v}</span>
+                },
+                { key: "min_bet", label: "ต่ำสุด", render: v => fmtMoney(v) },
+                { key: "max_bet", label: "สูงสุด", render: v => fmtMoney(v) },
+                { key: "id", label: "แก้ไข", render: (v, row) => (
+                  <button onClick={() => { setEditRateId(v); setEditRateVal(row.payout_rate); }} style={{ background: "none", border: "none", color: "#60a5fa", cursor: "pointer" }}><Icon name="edit" size={14} /></button>
+                )},
+              ]}
+              data={rates}
+            />
+          </div>
         </div>
       </div>
 
-      {/* ── แทนที่ส่วน Number Limits เดิม ── */}
-<div style={{ background: "#0a0f1e", border: "1px solid #1e293b", borderRadius: 12, padding: 20 }}>
-  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
-    <span style={{ color: "#94a3b8", fontWeight: 700, fontSize: 14 }}>เลขอั้น / ปิดเลข</span>
-    <button onClick={() => setShowLimitModal(true)}
-      style={{ background: "#ef4444", color: "#fff", border: "none", borderRadius: 8, padding: "6px 14px", cursor: "pointer", fontSize: 13 }}>
-      + เพิ่มเลขอั้น
-    </button>
-  </div>
-
-  {limits.length === 0
-    ? <div style={{ color: "#475569", textAlign: "center", padding: 24 }}>ยังไม่มีเลขอั้นสำหรับงวดนี้</div>
-    : <Table
-        columns={[
-          { key: "betType", label: "ประเภท", render: v => BET_TYPES.find(b => b.id === v)?.label },
-          { key: "number", label: "เลข", render: v => <span style={{ fontFamily: "monospace", fontSize: 18, letterSpacing: 4, color: "#fbbf24" }}>{v}</span> },
-          { key: "limit", label: "ยอดจำกัด", render: v => v ? `฿${Number(v).toLocaleString()}` : "-" },
-          { key: "rateOverride", label: "อัตราพิเศษ", render: v => v ? `฿${v}` : "-" },
-          { key: "isClosed", label: "สถานะ", render: v => <Badge status={v ? "closed" : "open"} /> },
-          { key: "number", label: "", render: (v, row) => (
-            <button onClick={() => setLimits(limits.filter(l => l !== row))}
-              style={{ background: "none", border: "none", color: "#ef4444", cursor: "pointer", fontSize: 13 }}>ลบ</button>
-          )},
-        ]}
-        data={limits}
-      />
-  }
-</div>
-
-{/* ── Modal ── */}
-{showLimitModal && (
-  <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
-    <div style={{ background: "#0a0f1e", border: "1px solid #1e293b", borderRadius: 16, padding: 28, width: 460 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 20 }}>
-        <span style={{ color: "#fff", fontWeight: 700, fontSize: 16 }}>เพิ่มเลขอั้น</span>
-        <button onClick={() => setShowLimitModal(false)} style={{ background: "none", border: "none", color: "#64748b", cursor: "pointer", fontSize: 18 }}>✕</button>
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
-        {[
-          { label: "ประเภทการแทง", key: "betType", type: "select" },
-          { label: "เลข", key: "number", placeholder: "เช่น 456" },
-          { label: "ยอดจำกัด (บาท)", key: "limit", placeholder: "เช่น 5000", type: "number" },
-          { label: "อัตราจ่ายพิเศษ", key: "rateOverride", placeholder: "เช่น 500", type: "number" },
-        ].map((f, i) => (
-          <div key={i}>
-            <div style={{ color: "#64748b", fontSize: 12, marginBottom: 6 }}>{f.label}</div>
-            {f.type === "select"
-              ? <select value={limitForm.betType} onChange={e => setLimitForm({ ...limitForm, betType: e.target.value })}
-                  style={{ width: "100%", background: "#0f172a", border: "1px solid #1e293b", borderRadius: 8, padding: "8px 12px", color: "#cbd5e1", outline: "none", boxSizing: "border-box" }}>
-                  {BET_TYPES.map(b => <option key={b.id} value={b.id}>{b.label}</option>)}
-                </select>
-              : <input type={f.type || "text"} placeholder={f.placeholder} value={limitForm[f.key]}
-                  onChange={e => setLimitForm({ ...limitForm, [f.key]: e.target.value })}
-                  style={{ width: "100%", background: "#0f172a", border: "1px solid #1e293b", borderRadius: 8, padding: "8px 12px", color: "#cbd5e1", outline: "none", boxSizing: "border-box" }} />
-            }
+      {/* Number Limits */}
+      {selectedDraw && (
+        <div style={{ background: "#0a0f1e", border: "1px solid #1e293b", borderRadius: 12, padding: 16 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
+            <span style={{ color: "#94a3b8", fontWeight: 700, fontSize: 14 }}>เลขอั้น / ปิดเลข</span>
+            <Btn variant="danger" onClick={() => setShowLimitModal(true)}>+ เพิ่มเลขอั้น</Btn>
           </div>
-        ))}
-      </div>
+          {limits.length === 0
+            ? <div style={{ color: "#475569", textAlign: "center", padding: 24 }}>ยังไม่มีเลขอั้น</div>
+            : <Table
+                columns={[
+                  { key: "bet_type", label: "ประเภท", render: v => BET_TYPE_LABELS[v] || v },
+                  { key: "number", label: "เลข", render: v => <span style={{ fontFamily: "monospace", fontSize: 18, letterSpacing: 4, color: "#fbbf24", fontWeight: 700 }}>{v}</span> },
+                  { key: "original_limit", label: "ยอดจำกัด", render: v => v ? fmtMoney(v) : "-" },
+                  { key: "remaining_limit", label: "คงเหลือ", render: v => v ? fmtMoney(v) : "-" },
+                  { key: "payout_rate_override", label: "อัตราพิเศษ", render: v => v ? `฿${v}` : "-" },
+                  { key: "is_closed", label: "สถานะ", render: v => <Badge status={v ? "closed" : "open"} /> },
+                  { key: "id", label: "", render: v => <Btn variant="reject" onClick={() => removeLimit(v)} style={{ padding: "3px 10px", fontSize: 12 }}>ลบ</Btn> },
+                ]}
+                data={limits}
+              />
+          }
+        </div>
+      )}
 
-      <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16, cursor: "pointer" }}>
-        <input type="checkbox" checked={limitForm.isClosed}
-          onChange={e => setLimitForm({ ...limitForm, isClosed: e.target.checked })} />
-        <span style={{ color: "#cbd5e1", fontSize: 13 }}>ปิดรับแทงเลขนี้ทันที</span>
-      </label>
+      {/* Add Limit Modal */}
+      {showLimitModal && (
+        <Modal title="เพิ่มเลขอั้น" onClose={() => setShowLimitModal(false)}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <Select label="ประเภทการแทง" value={limitForm.betType} onChange={e => setLimitForm({ ...limitForm, betType: e.target.value })}>
+                {BET_TYPES.map(b => <option key={b.id} value={b.id}>{b.label}</option>)}
+              </Select>
+              <Input label="เลข *" value={limitForm.number} onChange={e => setLimitForm({ ...limitForm, number: e.target.value })} maxLength={3} placeholder="เช่น 456" />
+              <Input label="ยอดจำกัด (บาท)" type="number" value={limitForm.limit} onChange={e => setLimitForm({ ...limitForm, limit: e.target.value })} placeholder="เช่น 5000" />
+              <Input label="อัตราจ่ายพิเศษ" type="number" value={limitForm.rateOverride} onChange={e => setLimitForm({ ...limitForm, rateOverride: e.target.value })} placeholder="เช่น 500" />
+            </div>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+              <input type="checkbox" checked={limitForm.isClosed} onChange={e => setLimitForm({ ...limitForm, isClosed: e.target.checked })} />
+              <span style={{ color: "#cbd5e1", fontSize: 13 }}>ปิดรับแทงเลขนี้ทันที</span>
+            </label>
+            {limitErr && <div style={{ color: "#f87171", fontSize: 12 }}>{limitErr}</div>}
+            <div style={{ display: "flex", gap: 8 }}>
+              <Btn variant="danger" onClick={handleSaveLimit} style={{ flex: 1, padding: 12 }}>บันทึก</Btn>
+              <Btn variant="ghost" onClick={() => setShowLimitModal(false)}>ยกเลิก</Btn>
+            </div>
+          </div>
+        </Modal>
+      )}
 
-      {limitErr && <div style={{ color: "#ef4444", fontSize: 12, marginBottom: 10 }}>{limitErr}</div>}
-
-      <div style={{ display: "flex", gap: 8 }}>
-        <button onClick={saveLimitItem}
-          style={{ flex: 1, background: "#ef4444", color: "#fff", border: "none", borderRadius: 8, padding: 12, cursor: "pointer", fontWeight: 700 }}>
-          บันทึก
-        </button>
-        <button onClick={() => setShowLimitModal(false)}
-          style={{ background: "#1e293b", color: "#94a3b8", border: "1px solid #334155", borderRadius: 8, padding: "12px 20px", cursor: "pointer" }}>
-          ยกเลิก
-        </button>
-      </div>
+      {/* Set Result Modal */}
+      {showResultModal && (
+        <Modal title="บันทึกผลรางวัล" onClose={() => setShowResultModal(false)}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+              <Input label="3 ตัวบน *" value={resultForm.three_top} onChange={e => setResultForm({ ...resultForm, three_top: e.target.value })} maxLength={3} placeholder="456" />
+              <Input label="2 ตัวบน *" value={resultForm.two_top} onChange={e => setResultForm({ ...resultForm, two_top: e.target.value })} maxLength={2} placeholder="56" />
+              <Input label="2 ตัวล่าง *" value={resultForm.two_bottom} onChange={e => setResultForm({ ...resultForm, two_bottom: e.target.value })} maxLength={2} placeholder="78" />
+              <Input label="3 ตัวหน้า 1" value={resultForm.three_front1} onChange={e => setResultForm({ ...resultForm, three_front1: e.target.value })} maxLength={3} placeholder="123" />
+              <Input label="3 ตัวหน้า 2" value={resultForm.three_front2} onChange={e => setResultForm({ ...resultForm, three_front2: e.target.value })} maxLength={3} placeholder="234" />
+              <Input label="3 ตัวล่าง 1" value={resultForm.three_bottom1} onChange={e => setResultForm({ ...resultForm, three_bottom1: e.target.value })} maxLength={3} placeholder="345" />
+              <Input label="3 ตัวล่าง 2" value={resultForm.three_bottom2} onChange={e => setResultForm({ ...resultForm, three_bottom2: e.target.value })} maxLength={3} placeholder="456" />
+            </div>
+            <div style={{ background: "#3d2a00", color: "#fbbf24", borderRadius: 8, padding: "10px 14px", fontSize: 13 }}>
+              ⚠️ การบันทึกผลจะคำนวณรางวัลและจ่ายเงินอัตโนมัติ ไม่สามารถยกเลิกได้
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <Btn onClick={handleSetResult} style={{ flex: 1, padding: 12 }}>ยืนยันบันทึกผล</Btn>
+              <Btn variant="ghost" onClick={() => setShowResultModal(false)}>ยกเลิก</Btn>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
-  </div>
-)}
+  );
 };
 
 // ─── Finance Page ─────────────────────────────────────────────
 const FinancePage = () => {
-  const [tab, setTab] = useState("deposit");
+  const [tab, setTab] = useState("withdraw");
+  const { transactions, loading, approve, reject } = useTransactions(tab === "all" ? null : tab);
+
+  const pendingOnly = transactions.filter(t => t.status === "pending");
+  const totalPending = pendingOnly.reduce((s, t) => s + (t.amount || 0), 0);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-        <StatCard label="ฝากรวม" value="฿0.00" sub="0 รายการ" color="#4ade80" icon="deposit" />
-        <StatCard label="ฝาก(ออได้)" value="฿0.00" sub="0 รายการ" color="#4ade80" icon="deposit" />
-        <StatCard label="ฝากตรง" value="฿0.00" sub="0 รายการ" color="#00d4aa" icon="deposit" />
-        <StatCard label="โบนัส" value="฿0.00" sub="0 รายการ" color="#a78bfa" icon="win" />
+        <StatCard label="รอถอน" value={fmtMoney(totalPending)} sub={`${pendingOnly.length} รายการ`} color="#fbbf24" icon="withdraw" />
+        <StatCard label="ทั้งหมด" value={transactions.length} color="#60a5fa" icon="finance" />
       </div>
 
       <div style={{ display: "flex", gap: 8 }}>
-        {[{ id: "deposit", label: "รายการฝาก" }, { id: "withdraw", label: "รายการถอน" }].map(t => (
-          <button key={t.id} onClick={() => setTab(t.id)} style={{
-            background: tab === t.id ? "#00d4aa" : "#0f172a",
-            color: tab === t.id ? "#000" : "#94a3b8",
-            border: "1px solid #1e293b", borderRadius: 8, padding: "8px 20px", cursor: "pointer", fontWeight: 700
-          }}>{t.label}</button>
+        {[{ id: "deposit", label: "ฝากเงิน" }, { id: "withdraw", label: "ถอนเงิน" }, { id: "all", label: "ทั้งหมด" }].map(t => (
+          <button key={t.id} onClick={() => setTab(t.id)}
+            style={{ background: tab === t.id ? "#00d4aa" : "#0f172a", color: tab === t.id ? "#000" : "#94a3b8", border: "1px solid #1e293b", borderRadius: 8, padding: "8px 20px", cursor: "pointer", fontWeight: 700, fontFamily: "inherit" }}>
+            {t.label}
+          </button>
         ))}
       </div>
 
       <div style={{ background: "#0a0f1e", border: "1px solid #1e293b", borderRadius: 12, padding: 16 }}>
-        <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-          {["วันนี้", "เมื่อวานนี้", "สัปดาห์นี้", "เดือนนี้"].map(d => (
-            <button key={d} style={{ background: d === "วันนี้" ? "#00d4aa" : "#0f172a", color: d === "วันนี้" ? "#000" : "#64748b", border: "1px solid #1e293b", borderRadius: 6, padding: "5px 12px", cursor: "pointer", fontSize: 12 }}>{d}</button>
-          ))}
-        </div>
-        <Table
-          columns={[
-            { key: "id", label: "#" },
-            { key: "date", label: "วันที่" },
-            { key: "user", label: "ผู้เล่น" },
-            { key: "bank", label: "ธนาคาร" },
-            { key: "amount", label: "จำนวน", render: v => <span style={{ color: "#4ade80", fontWeight: 700 }}>฿{v.toLocaleString()}</span> },
-            { key: "status", label: "สถานะ", render: v => <Badge status={v} /> },
-            { key: "id", label: "จัดการ", render: (v, row) => row.status === "pending" ? (
-              <div style={{ display: "flex", gap: 6 }}>
-                <button style={{ background: "#0d4f2b", color: "#4ade80", border: "1px solid #166534", borderRadius: 6, padding: "3px 10px", cursor: "pointer", fontSize: 12 }}>อนุมัติ</button>
-                <button style={{ background: "#4a1414", color: "#f87171", border: "1px solid #7f1d1d", borderRadius: 6, padding: "3px 10px", cursor: "pointer", fontSize: 12 }}>ปฏิเสธ</button>
-              </div>
-            ) : <Badge status={row.status} /> },
-          ]}
-          data={MOCK_TRANSACTIONS.filter(t => t.type === tab)}
-        />
+        {loading ? <Spinner /> : (
+          <Table
+            columns={[
+              { key: "ref_number", label: "เลขอ้างอิง" },
+              { key: "created_at", label: "วันที่", render: v => fmtDate(v) },
+              { key: "user", label: "ผู้ใช้", render: v => v?.phone || v?.username || "-" },
+              { key: "type", label: "ประเภท", render: v => <Badge status={v} /> },
+              { key: "amount", label: "จำนวน", render: (v, row) => (
+                <span style={{ color: row.type === "deposit" || row.type === "win" ? "#4ade80" : "#fb923c", fontWeight: 700 }}>
+                  {row.type === "deposit" || row.type === "win" ? "+" : "-"}{fmtMoney(v)}
+                </span>
+              )},
+              { key: "bank_account", label: "ธนาคาร", render: v => v ? `${v.bank_name} ${v.account_number}` : "-" },
+              { key: "status", label: "สถานะ", render: v => <Badge status={v} /> },
+              { key: "id", label: "จัดการ", render: (v, row) => row.status === "pending"
+                ? <div style={{ display: "flex", gap: 6 }}>
+                    <Btn variant="approve" onClick={() => approve(v)} style={{ padding: "3px 10px", fontSize: 12 }}>อนุมัติ</Btn>
+                    <Btn variant="reject" onClick={() => reject(v)} style={{ padding: "3px 10px", fontSize: 12 }}>ปฏิเสธ</Btn>
+                  </div>
+                : <Badge status={row.status} />
+              },
+            ]}
+            data={transactions}
+          />
+        )}
       </div>
     </div>
   );
 };
 
 // ─── Betting Page ─────────────────────────────────────────────
-const BettingPage = () => (
-  <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-    <div style={{ background: "#0a0f1e", border: "1px solid #1e293b", borderRadius: 12, padding: 16 }}>
-      <div style={{ color: "#94a3b8", fontWeight: 700, marginBottom: 16, fontSize: 14 }}>ประวัติการแทง</div>
-      <Table
-        columns={[
-          { key: "id", label: "เลขบิล" },
-          { key: "lottery", label: "หวย" },
-          { key: "type", label: "ประเภท" },
-          { key: "number", label: "เลข", render: v => <span style={{ color: "#fbbf24", fontWeight: 800, fontSize: 16, letterSpacing: 2 }}>{v}</span> },
-          { key: "amount", label: "ยอดแทง", render: v => `฿${v}` },
-          { key: "rate", label: "อัตราจ่าย" },
-          { key: "potential", label: "รางวัลถ้าถูก", render: v => <span style={{ color: "#00d4aa" }}>฿{v.toLocaleString()}</span> },
-          { key: "status", label: "สถานะ", render: v => <Badge status={v} /> },
-          { key: "date", label: "วันที่" },
-        ]}
-        data={MOCK_BETS}
-      />
+const BettingPage = () => {
+  const { slips, loading } = useBetSlips();
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+
+  const filtered = slips.filter(s => {
+    const matchSearch = (s.slip_number || "").includes(search) || (s.user?.phone || "").includes(search);
+    const matchStatus = statusFilter === "all" || s.status === statusFilter;
+    return matchSearch && matchStatus;
+  });
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+        <StatCard label="บิลทั้งหมด" value={slips.length} color="#00d4aa" icon="bet" />
+        <StatCard label="รอออกผล" value={slips.filter(s => s.status === "pending").length} color="#fbbf24" icon="bet" />
+        <StatCard label="ถูกรางวัล" value={slips.filter(s => s.status === "won").length} color="#4ade80" icon="win" />
+        <StatCard label="ไม่ถูก" value={slips.filter(s => s.status === "lost").length} color="#f87171" icon="bet" />
+      </div>
+
+      <div style={{ background: "#0a0f1e", border: "1px solid #1e293b", borderRadius: 12, padding: 16 }}>
+        <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
+          <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 8, background: "#0f172a", border: "1px solid #1e293b", borderRadius: 8, padding: "8px 12px" }}>
+            <Icon name="search" size={16} />
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="ค้นหาเลขบิล หรือ เบอร์โทร..." style={{ background: "none", border: "none", color: "#cbd5e1", outline: "none", flex: 1, fontFamily: "inherit", fontSize: 13 }} />
+          </div>
+          <Select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+            <option value="all">ทุกสถานะ</option>
+            <option value="pending">รอออกผล</option>
+            <option value="won">ถูกรางวัล</option>
+            <option value="lost">ไม่ถูก</option>
+          </Select>
+        </div>
+
+        {loading ? <Spinner /> : (
+          <Table
+            columns={[
+              { key: "slip_number", label: "เลขบิล" },
+              { key: "user", label: "ผู้เล่น", render: v => v?.phone || v?.username || "-" },
+              { key: "draw", label: "หวย", render: v => v?.lottery_group?.name || "-" },
+              { key: "total_amount", label: "ยอดแทง", render: v => fmtMoney(v) },
+              { key: "total_win", label: "รางวัล", render: v => <span style={{ color: "#4ade80" }}>{fmtMoney(v)}</span> },
+              { key: "status", label: "สถานะ", render: v => <Badge status={v} /> },
+              { key: "created_at", label: "วันที่", render: v => fmtDate(v) },
+              { key: "bet_items", label: "รายการ", render: v => (
+                <span style={{ color: "#94a3b8" }}>{v?.length || 0} รายการ</span>
+              )},
+            ]}
+            data={filtered}
+          />
+        )}
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 // ─── Report Page ──────────────────────────────────────────────
-const ReportPage = () => (
-  <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-    <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-      <StatCard label="ยอดแทงรวม" value="฿624.00" sub="ทุกงวด" color="#00d4aa" icon="report" />
-      <StatCard label="กำไรบริษัท" value="฿190.00" sub="รวมทุกงวด" color="#4ade80" icon="win" />
-      <StatCard label="จ่ายรางวัล" value="฿434.00" sub="รวมทุกงวด" color="#fbbf24" icon="finance" />
-      <StatCard label="คอมมิชชั่น" value="฿0.00" sub="จ่ายให้เอเย่นต์" color="#a78bfa" icon="members" />
-    </div>
+const ReportPage = () => {
+  const { summary, loading } = useDailySummary();
 
-    <div style={{ background: "#0a0f1e", border: "1px solid #1e293b", borderRadius: 12, padding: 16 }}>
-      <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
-        <div style={{ color: "#94a3b8", fontWeight: 700, fontSize: 14, flex: 1 }}>รายงานแพ้/ชนะ ระบบ</div>
-        {["วันนี้", "เมื่อวานนี้", "สัปดาห์นี้", "สัปดาห์ที่แล้ว", "เดือนนี้", "เดือนที่แล้ว"].map(d => (
-          <button key={d} style={{ background: d === "วันนี้" ? "#00d4aa" : "#0f172a", color: d === "วันนี้" ? "#000" : "#64748b", border: "1px solid #1e293b", borderRadius: 6, padding: "5px 12px", cursor: "pointer", fontSize: 12 }}>{d}</button>
-        ))}
+  const totalBet = summary.reduce((s, r) => s + (r.total_bet_amount || 0), 0);
+  const totalPayout = summary.reduce((s, r) => s + (r.total_payout || 0), 0);
+  const netProfit = summary.reduce((s, r) => s + (r.net_profit || 0), 0);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+        <StatCard label="ยอดแทงรวม" value={fmtMoney(totalBet)} color="#00d4aa" icon="report" />
+        <StatCard label="จ่ายรางวัล" value={fmtMoney(totalPayout)} color="#fbbf24" icon="finance" />
+        <StatCard label="กำไรสุทธิ" value={fmtMoney(netProfit)} color={netProfit >= 0 ? "#4ade80" : "#f87171"} icon="win" />
       </div>
-      <Table
-        columns={[
-          { key: "game", label: "เกมส์" },
-          { key: "totalBet", label: "เดิมพันรวม", render: v => <span style={{ color: "#4ade80" }}>฿{v}</span> },
-          { key: "winLoss", label: "แพ้/ชนะ", render: v => <span style={{ color: "#4ade80" }}>฿{v}</span> },
-          { key: "playerBet", label: "ผู้เล่น", render: v => <span style={{ color: v < 0 ? "#f87171" : "#4ade80" }}>฿{v}</span> },
-          { key: "agentBet", label: "เอเย่นต์", render: v => <span style={{ color: "#60a5fa" }}>฿{v}</span> },
-          { key: "systemWin", label: "บริษัท", render: v => <span style={{ color: "#00d4aa", fontWeight: 700 }}>฿{v}</span> },
-        ]}
-        data={MOCK_REPORT}
-      />
-      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12, gap: 8 }}>
-        <button style={{ background: "#1e293b", color: "#94a3b8", border: "1px solid #334155", borderRadius: 8, padding: "6px 14px", cursor: "pointer", fontSize: 13 }}>📊 Export Excel</button>
-        <button style={{ background: "#1e293b", color: "#94a3b8", border: "1px solid #334155", borderRadius: 8, padding: "6px 14px", cursor: "pointer", fontSize: 13 }}>📄 Export PDF</button>
+
+      <div style={{ background: "#0a0f1e", border: "1px solid #1e293b", borderRadius: 12, padding: 16 }}>
+        <div style={{ color: "#94a3b8", fontWeight: 700, marginBottom: 16, fontSize: 14 }}>รายงานรายวัน</div>
+        {loading ? <Spinner /> : (
+          <Table
+            columns={[
+              { key: "summary_date", label: "วันที่" },
+              { key: "lottery_group", label: "หวย", render: v => v?.name || "ทั้งหมด" },
+              { key: "total_bets", label: "จำนวนบิล" },
+              { key: "total_bet_amount", label: "ยอดแทง", render: v => <span style={{ color: "#60a5fa" }}>{fmtMoney(v)}</span> },
+              { key: "total_payout", label: "จ่ายรางวัล", render: v => <span style={{ color: "#fbbf24" }}>{fmtMoney(v)}</span> },
+              { key: "gross_profit", label: "กำไรขั้นต้น", render: v => <span style={{ color: v >= 0 ? "#4ade80" : "#f87171" }}>{fmtMoney(v)}</span> },
+              { key: "commission_paid", label: "คอมมิชชั่น", render: v => fmtMoney(v) },
+              { key: "net_profit", label: "กำไรสุทธิ", render: v => <span style={{ color: v >= 0 ? "#4ade80" : "#f87171", fontWeight: 700 }}>{fmtMoney(v)}</span> },
+            ]}
+            data={summary}
+          />
+        )}
       </div>
     </div>
-  </div>
-);
+  );
+};
 
 // ─── Settings Page ────────────────────────────────────────────
-const SettingsPage = () => (
-  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-    <div style={{ background: "#0a0f1e", border: "1px solid #1e293b", borderRadius: 12, padding: 20 }}>
-      <div style={{ color: "#94a3b8", fontWeight: 700, marginBottom: 16, fontSize: 14 }}>ตั้งค่าระบบ</div>
-      {[
-        { label: "ยอดฝากขั้นต่ำ (บาท)", val: "100" },
-        { label: "ยอดถอนขั้นต่ำ (บาท)", val: "100" },
-        { label: "ยอดถอนสูงสุด/วัน (บาท)", val: "500000" },
-        { label: "ปิดรับแทงก่อนออกผล (นาที)", val: "30" },
-        { label: "โบนัสสมาชิกใหม่ (บาท)", val: "0" },
-      ].map((f, i) => (
-        <div key={i} style={{ marginBottom: 14 }}>
-          <div style={{ color: "#64748b", fontSize: 12, marginBottom: 6 }}>{f.label}</div>
-          <input defaultValue={f.val} style={{ width: "100%", background: "#0f172a", border: "1px solid #1e293b", borderRadius: 8, padding: "8px 12px", color: "#cbd5e1", outline: "none", boxSizing: "border-box" }} />
-        </div>
-      ))}
-      <button style={{ background: "#00d4aa", color: "#000", border: "none", borderRadius: 8, padding: "10px 20px", cursor: "pointer", fontWeight: 700 }}>บันทึกการตั้งค่า</button>
-    </div>
+const SettingsPage = () => {
+  const [settings, setSettings] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
 
-    <div style={{ background: "#0a0f1e", border: "1px solid #1e293b", borderRadius: 12, padding: 20 }}>
-      <div style={{ color: "#94a3b8", fontWeight: 700, marginBottom: 16, fontSize: 14 }}>บัญชีธนาคารรับเงิน</div>
-      <button style={{ background: "#1e293b", color: "#60a5fa", border: "1px solid #334155", borderRadius: 8, padding: "8px 14px", cursor: "pointer", fontSize: 13, marginBottom: 16 }}>+ เพิ่มบัญชีธนาคาร</button>
-      <div style={{ color: "#475569", textAlign: "center", padding: 24 }}>ยังไม่มีบัญชีธนาคาร</div>
+  useEffect(() => {
+    supabase.from("system_settings").select("*").then(({ data }) => {
+      if (data) {
+        const obj = {};
+        data.forEach(s => { obj[s.key] = s.value; });
+        setSettings(obj);
+      }
+      setLoading(false);
+    });
+  }, []);
 
-      <div style={{ color: "#94a3b8", fontWeight: 700, marginBottom: 12, marginTop: 20, fontSize: 14 }}>โหมดการทำงาน</div>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 0", borderBottom: "1px solid #1e293b" }}>
-        <div>
-          <div style={{ color: "#cbd5e1", fontSize: 13 }}>ปิดระบบชั่วคราว (Maintenance)</div>
-          <div style={{ color: "#475569", fontSize: 11 }}>ผู้เล่นจะไม่สามารถเข้าถึงระบบได้</div>
-        </div>
-        <div style={{ width: 44, height: 24, background: "#1e293b", borderRadius: 12, cursor: "pointer", position: "relative" }}>
-          <div style={{ position: "absolute", left: 2, top: 2, width: 20, height: 20, background: "#64748b", borderRadius: 10 }} />
-        </div>
+  const save = async () => {
+    setSaving(true);
+    const updates = Object.entries(settings).map(([key, value]) => ({ key, value }));
+    await Promise.all(updates.map(u =>
+      supabase.from("system_settings").upsert(u, { onConflict: "key" })
+    ));
+    setSaving(false);
+    alert("บันทึกการตั้งค่าเรียบร้อย");
+  };
+
+  const FIELDS = [
+    { key: "min_deposit", label: "ยอดฝากขั้นต่ำ (บาท)" },
+    { key: "min_withdraw", label: "ยอดถอนขั้นต่ำ (บาท)" },
+    { key: "max_withdraw_per_day", label: "ยอดถอนสูงสุด/วัน (บาท)" },
+    { key: "bet_close_before_minutes", label: "ปิดรับแทงก่อนออกผล (นาที)" },
+    { key: "new_member_bonus", label: "โบนัสสมาชิกใหม่ (บาท)" },
+  ];
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+      <div style={{ background: "#0a0f1e", border: "1px solid #1e293b", borderRadius: 12, padding: 20 }}>
+        <div style={{ color: "#94a3b8", fontWeight: 700, marginBottom: 16, fontSize: 14 }}>ตั้งค่าระบบ</div>
+        {loading ? <Spinner /> : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            {FIELDS.map(f => (
+              <Input key={f.key} label={f.label} value={settings[f.key] || ""} onChange={e => setSettings({ ...settings, [f.key]: e.target.value })} />
+            ))}
+            <Btn onClick={save} style={{ marginTop: 8 }}>{saving ? "กำลังบันทึก..." : "บันทึกการตั้งค่า"}</Btn>
+          </div>
+        )}
       </div>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 0" }}>
-        <div>
-          <div style={{ color: "#cbd5e1", fontSize: 13 }}>ดึงผลอัตโนมัติ (Auto Result)</div>
-          <div style={{ color: "#475569", fontSize: 11 }}>ดึงผลหวยจาก API อัตโนมัติ</div>
-        </div>
-        <div style={{ width: 44, height: 24, background: "#0d4f2b", borderRadius: 12, cursor: "pointer", position: "relative" }}>
-          <div style={{ position: "absolute", right: 2, top: 2, width: 20, height: 20, background: "#4ade80", borderRadius: 10 }} />
-        </div>
+
+      <div style={{ background: "#0a0f1e", border: "1px solid #1e293b", borderRadius: 12, padding: 20 }}>
+        <div style={{ color: "#94a3b8", fontWeight: 700, marginBottom: 16, fontSize: 14 }}>การทำงานระบบ</div>
+        {[
+          { key: "maintenance_mode", label: "ปิดระบบชั่วคราว (Maintenance)", desc: "ผู้เล่นจะเข้าไม่ได้" },
+          { key: "auto_result", label: "ดึงผลอัตโนมัติ", desc: "ดึงผลจาก API อัตโนมัติ" },
+        ].map(s => (
+          <div key={s.key} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 0", borderBottom: "1px solid #1e293b" }}>
+            <div>
+              <div style={{ color: "#cbd5e1", fontSize: 13 }}>{s.label}</div>
+              <div style={{ color: "#475569", fontSize: 11 }}>{s.desc}</div>
+            </div>
+            <div
+              onClick={() => setSettings({ ...settings, [s.key]: settings[s.key] === "true" ? "false" : "true" })}
+              style={{ width: 44, height: 24, background: settings[s.key] === "true" ? "#0d4f2b" : "#1e293b", borderRadius: 12, cursor: "pointer", position: "relative", transition: "background 0.2s" }}>
+              <div style={{ position: "absolute", top: 2, left: settings[s.key] === "true" ? 22 : 2, width: 20, height: 20, background: settings[s.key] === "true" ? "#4ade80" : "#64748b", borderRadius: 10, transition: "left 0.2s" }} />
+            </div>
+          </div>
+        ))}
       </div>
     </div>
-  </div>
-);
+  );
+};
 
 // ─── Main App ─────────────────────────────────────────────────
-export default function LotterySystem() {
+export default function App() {
+  const [user, setUser] = useState(null);
+  const [checking, setChecking] = useState(true);
   const [page, setPage] = useState("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      setUser(data.session?.user || null);
+      setChecking(false);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, session) => {
+      setUser(session?.user || null);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setUser(null);
+  };
+
+  if (checking) return (
+    <div style={{ minHeight: "100vh", background: "#060c18", display: "flex", alignItems: "center", justifyContent: "center", color: "#475569", fontFamily: "inherit" }}>
+      กำลังโหลด...
+    </div>
+  );
+
+  if (!user) return <LoginPage onLogin={setUser} />;
+
   const navItems = [
-    { id: "dashboard", label: "Dashboard", icon: "dashboard" },
-    { id: "members", label: "สมาชิก", icon: "members" },
-    { id: "lottery", label: "จัดการหวย", icon: "lottery" },
-    { id: "betting", label: "บิล / การแทง", icon: "bet" },
-    { id: "finance", label: "การเงิน", icon: "finance" },
-    { id: "report", label: "รายงาน", icon: "report" },
-    { id: "settings", label: "ตั้งค่า", icon: "settings" },
+    { id: "dashboard", label: "Dashboard",    icon: "dashboard" },
+    { id: "members",   label: "สมาชิก",       icon: "members"   },
+    { id: "lottery",   label: "จัดการหวย",    icon: "lottery"   },
+    { id: "betting",   label: "บิล / การแทง", icon: "bet"       },
+    { id: "finance",   label: "การเงิน",       icon: "finance"   },
+    { id: "report",    label: "รายงาน",        icon: "report"    },
+    { id: "settings",  label: "ตั้งค่า",       icon: "settings"  },
   ];
 
-  const pageComponents = {
+  const pages = {
     dashboard: <DashboardPage />,
-    members: <MembersPage />,
-    lottery: <LotteryPage />,
-    betting: <BettingPage />,
-    finance: <FinancePage />,
-    report: <ReportPage />,
-    settings: <SettingsPage />,
+    members:   <MembersPage />,
+    lottery:   <LotteryPage />,
+    betting:   <BettingPage />,
+    finance:   <FinancePage />,
+    report:    <ReportPage />,
+    settings:  <SettingsPage />,
   };
 
   return (
-    <div style={{ display: "flex", height: "100vh", background: "#060c18", fontFamily: "'IBM Plex Sans Thai', 'Sarabun', sans-serif", overflow: "hidden" }}>
+    <div style={{ display: "flex", height: "100vh", background: "#060c18", fontFamily: "'IBM Plex Sans Thai','Sarabun',sans-serif", overflow: "hidden" }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@300;400;500;600;700&display=swap');
-        * { box-sizing: border-box; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
         ::-webkit-scrollbar { width: 6px; height: 6px; }
         ::-webkit-scrollbar-track { background: #0a0f1e; }
         ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 3px; }
-        input { font-family: inherit; font-size: 13px; }
-        button { font-family: inherit; }
+        input, select, button, textarea { font-family: inherit; }
+        tr:hover td { background: #0f172a22; }
       `}</style>
 
       {/* Sidebar */}
       <div style={{ width: sidebarOpen ? 220 : 64, background: "#0a0f1e", borderRight: "1px solid #1e293b", display: "flex", flexDirection: "column", transition: "width 0.2s", overflow: "hidden", flexShrink: 0 }}>
-        {/* Logo */}
         <div style={{ padding: "20px 16px", borderBottom: "1px solid #1e293b", display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ width: 32, height: 32, background: "linear-gradient(135deg, #00d4aa, #0066ff)", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0 }}>🎰</div>
+          <div style={{ width: 32, height: 32, background: "linear-gradient(135deg,#00d4aa,#0066ff)", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0 }}>🎰</div>
           {sidebarOpen && <span style={{ color: "#fff", fontWeight: 800, fontSize: 15, whiteSpace: "nowrap" }}>LottoPro Admin</span>}
         </div>
 
-        {/* Nav */}
         <nav style={{ flex: 1, padding: "12px 8px", overflowY: "auto" }}>
           {navItems.map(item => (
             <button key={item.id} onClick={() => setPage(item.id)} style={{
@@ -638,7 +1079,6 @@ export default function LotterySystem() {
               color: page === item.id ? "#00d4aa" : "#64748b",
               border: page === item.id ? "1px solid #00d4aa30" : "1px solid transparent",
               cursor: "pointer", textAlign: "left", fontWeight: page === item.id ? 600 : 400,
-              transition: "all 0.15s",
             }}>
               <span style={{ flexShrink: 0 }}><Icon name={item.icon} size={17} /></span>
               {sidebarOpen && <span style={{ fontSize: 13, whiteSpace: "nowrap" }}>{item.label}</span>}
@@ -646,33 +1086,33 @@ export default function LotterySystem() {
           ))}
         </nav>
 
-        {/* Collapse Button */}
-        <div style={{ padding: "12px 8px", borderTop: "1px solid #1e293b" }}>
-          <button onClick={() => setSidebarOpen(!sidebarOpen)} style={{ width: "100%", background: "#0f172a", border: "1px solid #1e293b", borderRadius: 8, padding: "8px", color: "#64748b", cursor: "pointer", display: "flex", justifyContent: "center" }}>
+        <div style={{ padding: "12px 8px", borderTop: "1px solid #1e293b", display: "flex", flexDirection: "column", gap: 8 }}>
+          {sidebarOpen && (
+            <button onClick={handleLogout} style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 8, background: "none", border: "1px solid #334155", color: "#64748b", cursor: "pointer", fontSize: 13 }}>
+              <Icon name="logout" size={15} /> ออกจากระบบ
+            </button>
+          )}
+          <button onClick={() => setSidebarOpen(!sidebarOpen)} style={{ width: "100%", background: "#0f172a", border: "1px solid #1e293b", borderRadius: 8, padding: 8, color: "#64748b", cursor: "pointer", display: "flex", justifyContent: "center" }}>
             {sidebarOpen ? "◀" : "▶"}
           </button>
         </div>
       </div>
 
-      {/* Main Content */}
+      {/* Main */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-        {/* Header */}
         <div style={{ background: "#0a0f1e", borderBottom: "1px solid #1e293b", padding: "14px 24px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div>
-            <div style={{ color: "#fff", fontWeight: 700, fontSize: 16 }}>
-              {navItems.find(n => n.id === page)?.label}
-            </div>
-            <div style={{ color: "#475569", fontSize: 12 }}>Supabase Lottery System v1.0</div>
+            <div style={{ color: "#fff", fontWeight: 700, fontSize: 16 }}>{navItems.find(n => n.id === page)?.label}</div>
+            <div style={{ color: "#475569", fontSize: 12 }}>Supabase Lottery System</div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <div style={{ background: "#0d4f2b", color: "#4ade80", padding: "4px 12px", borderRadius: 20, fontSize: 12, fontWeight: 600 }}>● Live</div>
-            <div style={{ width: 36, height: 36, background: "linear-gradient(135deg, #00d4aa, #0066ff)", borderRadius: 50, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 700, fontSize: 14 }}>A</div>
+            <div style={{ color: "#64748b", fontSize: 12 }}>{user.email}</div>
           </div>
         </div>
 
-        {/* Page Content */}
         <div style={{ flex: 1, overflowY: "auto", padding: 24 }}>
-          {pageComponents[page]}
+          {pages[page]}
         </div>
       </div>
     </div>
